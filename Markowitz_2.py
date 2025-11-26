@@ -10,6 +10,8 @@ import gurobipy as gp
 import warnings
 import argparse
 import sys
+import math
+
 
 """
 Project Setup
@@ -39,6 +41,7 @@ for asset in assets:
 
 df = Bdf.loc["2019-01-01":"2024-04-01"]
 
+
 """
 Strategy Creation
 
@@ -47,31 +50,116 @@ Create your own strategy, you can add parameter but please remain "price" and "e
 
 
 class MyPortfolio:
-    """
-    NOTE: You can modify the initialization function
-    """
 
-    def __init__(self, price, exclude, lookback=50, gamma=0):
+
+    def __init__(self, price, exclude, lookback=50, gamma=0,
+                 target_vol=0.10, topk=6, cap=0.20):
         self.price = price
         self.returns = price.pct_change().fillna(0)
         self.exclude = exclude
-        self.lookback = lookback
-        self.gamma = gamma
+        self.lookback = lookback      # 保留與原本一致
+        self.gamma = gamma            # 保留與原本一致（但不使用）
+        self.target_vol = target_vol
+        self.topk = topk
+        self.cap = cap
 
     def calculate_weights(self):
-        # Get the assets by excluding the specified column
-        assets = self.price.columns[self.price.columns != self.exclude]
 
-        # Calculate the portfolio weights
+        assets = self.price.columns[self.price.columns != self.exclude]
+        dates = self.price.index
+
         self.portfolio_weights = pd.DataFrame(
-            index=self.price.index, columns=self.price.columns
+            0.0, index=dates, columns=self.price.columns
         )
 
-        """
-        TODO: Complete Task 4 Below
-        """
-        
-        
+        short_w = 21
+        mid_w = 63
+        long_w = 252
+        ma_window = 200
+        vol_shrink = 0.5
+        eps = 1e-8
+        start_idx = max(long_w, self.lookback, ma_window)
+
+        for i in range(start_idx, len(dates)):
+            date = dates[i]
+
+            # ------- Momentum -------
+            R_short = self.returns[assets].iloc[i - short_w:i].mean()
+            R_mid = self.returns[assets].iloc[i - mid_w:i].mean()
+            R_long = self.returns[assets].iloc[max(0, i - long_w):i].mean()
+
+            momentum = (
+                0.6 * R_short +
+                0.3 * R_mid +
+                0.1 * R_long
+            ).fillna(0.0)
+
+            pos_mom = momentum.clip(lower=0.0)
+
+            # ------- top-K 選股 -------
+            if pos_mom.sum() == 0:
+                ranked = momentum.rank(method='first', ascending=False)
+            else:
+                ranked = pos_mom.rank(method='first', ascending=False)
+
+            selected = ranked.nsmallest(self.topk).index
+
+            # ------- 波動率估計 -------
+            vol_all = self.returns[assets].iloc[i - mid_w:i].std(ddof=0)
+            med = vol_all[vol_all > 0].median()
+            vol_all = vol_all.replace(0, med).fillna(med)
+
+            # shrinked inverse volatility
+            inv_vol = 1.0 / vol_all
+            mean_inv = inv_vol.mean()
+            inv_vol = vol_shrink * inv_vol + (1 - vol_shrink) * mean_inv
+
+            # 取選股區
+            inv_sel = inv_vol.loc[selected]
+            mom_sel = momentum.loc[selected].clip(lower=0.0)
+
+            raw = mom_sel * inv_sel
+            if raw.sum() <= 0 or not np.isfinite(raw.sum()):
+                raw = inv_sel.copy()
+
+            w_sel = raw / raw.sum()
+
+            # ------- 單檔上限 cap -------
+            w_sel = np.minimum(w_sel, self.cap)
+            if w_sel.sum() <= 0 or not np.isfinite(w_sel.sum()):
+                w_sel = pd.Series(1 / len(selected), index=selected)
+            else:
+                w_sel = w_sel / w_sel.sum()
+
+            # ------- 組成完整權重 vector -------
+            w_full = pd.Series(0.0, index=self.price.columns)
+            w_full.loc[w_sel.index] = w_sel.values
+
+            # ------- 市場 regime：SPY < MA200 降低曝險 -------
+            spy_hist = self.price[self.exclude].iloc[:i + 1]
+            ma200 = spy_hist.rolling(200).mean().iloc[-1]
+
+            regime_scale = 1.0
+            if pd.notna(ma200) and spy_hist.iloc[-1] < ma200:
+                regime_scale = 0.5
+
+            # ------- 波動率目標（vol targeting）-------
+            R_window = self.returns[assets].iloc[i - mid_w:i]
+            Sigma = R_window.cov(ddof=0).values
+
+            wA = np.array([w_full[a] for a in assets])
+            port_var_daily = float(wA @ Sigma @ wA)
+            port_vol_ann = math.sqrt(max(port_var_daily, eps)) * math.sqrt(252)
+
+            if port_vol_ann <= 0:
+                vol_scale = 1.0
+            else:
+                vol_scale = min(1.0, self.target_vol / port_vol_ann)
+
+            scale = regime_scale * vol_scale
+            w_scaled = w_full * scale
+
+            self.portfolio_weights.iloc[i] = w_scaled.values        
         """
         TODO: Complete Task 4 Above
         """
@@ -99,6 +187,7 @@ class MyPortfolio:
             self.calculate_portfolio_returns()
 
         return self.portfolio_weights, self.portfolio_returns
+
 
 
 if __name__ == "__main__":
@@ -141,3 +230,5 @@ if __name__ == "__main__":
     
     # All grading logic is protected in grader_2.py
     judge.run_grading(args)
+
+

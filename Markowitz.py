@@ -60,11 +60,17 @@ class EqualWeightPortfolio:
         self.portfolio_weights = pd.DataFrame(index=df.index, columns=df.columns)
 
         """
-        TODO: Complete Task 1 Below
+        Complete Task 1 Below
         """
+        m = len(assets)
+        # equal weight per asset
+        w = 1.0 / m
 
+        for date in df.index:
+            self.portfolio_weights.loc[date, :] = 0.0
+            self.portfolio_weights.loc[date, assets] = w
         """
-        TODO: Complete Task 1 Above
+        Task 1 Above
         """
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
@@ -111,13 +117,35 @@ class RiskParityPortfolio:
         self.portfolio_weights = pd.DataFrame(index=df.index, columns=df.columns)
 
         """
-        TODO: Complete Task 2 Below
+        Task 2 Below
         """
+        for i in range(self.lookback + 1, len(df)):
 
+            # 取過去 lookback 天的報酬
+            R_n = df_returns[assets].iloc[i - self.lookback : i]
 
+            # 計算各資產標準差 σ_i
+            sigma = R_n.std()
+
+            # 避免除以零或 NaN：若 σ_i = 0，改成最小非零值
+            sigma = sigma.replace(0, sigma[sigma > 0].min())
+            sigma = sigma.fillna(sigma.mean())
+
+            # 計算 inverse-vol 權重：1/σ_i
+            inv_vol = 1.0 / sigma
+
+            # 正規化：w_i = (1/σ_i) / Σ_j (1/σ_j)
+            w = inv_vol / inv_vol.sum()
+
+            # 放進 DataFrame
+            for col in df.columns:
+                if col in w.index:
+                    self.portfolio_weights.loc[df.index[i], col] = w.loc[col]
+                else:
+                    self.portfolio_weights.loc[df.index[i], col] = 0.0
 
         """
-        TODO: Complete Task 2 Above
+        Task 2 Above
         """
 
         self.portfolio_weights.ffill(inplace=True)
@@ -185,16 +213,21 @@ class MeanVariancePortfolio:
             env.start()
             with gp.Model(env=env, name="portfolio") as model:
                 """
-                TODO: Complete Task 3 Below
+                Complete Task 3 Below
                 """
+                w = model.addMVar(n, lb=0, ub=1, name="w")
 
-                # Sample Code: Initialize Decision w and the Objective
-                # NOTE: You can modify the following code
-                w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                # Constraint: sum(w) = 1
+                model.addConstr(w.sum() == 1)
 
+                # Objective:
+                # w^T mu − (γ/2) * w^T Σ w
+                linear_term = mu @ w
+                quad_term = w @ Sigma @ w
+
+                model.setObjective(linear_term - 0.5 * gamma * quad_term, gp.GRB.MAXIMIZE)
                 """
-                TODO: Complete Task 3 Above
+                Task 3 Above
                 """
                 model.optimize()
 
