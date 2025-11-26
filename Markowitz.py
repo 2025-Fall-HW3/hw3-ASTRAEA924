@@ -121,23 +121,21 @@ class RiskParityPortfolio:
         """
         for i in range(self.lookback + 1, len(df)):
 
-            # 取過去 lookback 天的報酬
+            
             R_n = df_returns[assets].iloc[i - self.lookback : i]
 
-            # 計算各資產標準差 σ_i
+            
             sigma = R_n.std()
 
-            # 避免除以零或 NaN：若 σ_i = 0，改成最小非零值
+
             sigma = sigma.replace(0, sigma[sigma > 0].min())
             sigma = sigma.fillna(sigma.mean())
 
-            # 計算 inverse-vol 權重：1/σ_i
             inv_vol = 1.0 / sigma
 
-            # 正規化：w_i = (1/σ_i) / Σ_j (1/σ_j)
             w = inv_vol / inv_vol.sum()
 
-            # 放進 DataFrame
+
             for col in df.columns:
                 if col in w.index:
                     self.portfolio_weights.loc[df.index[i], col] = w.loc[col]

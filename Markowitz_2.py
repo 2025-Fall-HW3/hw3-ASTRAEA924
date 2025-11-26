@@ -57,8 +57,8 @@ class MyPortfolio:
         self.price = price
         self.returns = price.pct_change().fillna(0)
         self.exclude = exclude
-        self.lookback = lookback      # 保留與原本一致
-        self.gamma = gamma            # 保留與原本一致（但不使用）
+        self.lookback = lookback      
+        self.gamma = gamma            
         self.target_vol = target_vol
         self.topk = topk
         self.cap = cap
@@ -83,7 +83,7 @@ class MyPortfolio:
         for i in range(start_idx, len(dates)):
             date = dates[i]
 
-            # ------- Momentum -------
+            
             R_short = self.returns[assets].iloc[i - short_w:i].mean()
             R_mid = self.returns[assets].iloc[i - mid_w:i].mean()
             R_long = self.returns[assets].iloc[max(0, i - long_w):i].mean()
@@ -96,7 +96,7 @@ class MyPortfolio:
 
             pos_mom = momentum.clip(lower=0.0)
 
-            # ------- top-K 選股 -------
+
             if pos_mom.sum() == 0:
                 ranked = momentum.rank(method='first', ascending=False)
             else:
@@ -104,17 +104,16 @@ class MyPortfolio:
 
             selected = ranked.nsmallest(self.topk).index
 
-            # ------- 波動率估計 -------
+     
             vol_all = self.returns[assets].iloc[i - mid_w:i].std(ddof=0)
             med = vol_all[vol_all > 0].median()
             vol_all = vol_all.replace(0, med).fillna(med)
 
-            # shrinked inverse volatility
             inv_vol = 1.0 / vol_all
             mean_inv = inv_vol.mean()
             inv_vol = vol_shrink * inv_vol + (1 - vol_shrink) * mean_inv
 
-            # 取選股區
+           
             inv_sel = inv_vol.loc[selected]
             mom_sel = momentum.loc[selected].clip(lower=0.0)
 
@@ -124,18 +123,17 @@ class MyPortfolio:
 
             w_sel = raw / raw.sum()
 
-            # ------- 單檔上限 cap -------
+           
             w_sel = np.minimum(w_sel, self.cap)
             if w_sel.sum() <= 0 or not np.isfinite(w_sel.sum()):
                 w_sel = pd.Series(1 / len(selected), index=selected)
             else:
                 w_sel = w_sel / w_sel.sum()
 
-            # ------- 組成完整權重 vector -------
             w_full = pd.Series(0.0, index=self.price.columns)
             w_full.loc[w_sel.index] = w_sel.values
 
-            # ------- 市場 regime：SPY < MA200 降低曝險 -------
+
             spy_hist = self.price[self.exclude].iloc[:i + 1]
             ma200 = spy_hist.rolling(200).mean().iloc[-1]
 
@@ -143,7 +141,7 @@ class MyPortfolio:
             if pd.notna(ma200) and spy_hist.iloc[-1] < ma200:
                 regime_scale = 0.5
 
-            # ------- 波動率目標（vol targeting）-------
+           
             R_window = self.returns[assets].iloc[i - mid_w:i]
             Sigma = R_window.cov(ddof=0).values
 
